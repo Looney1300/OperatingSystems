@@ -15,7 +15,7 @@
 //this is the actual command prompt and returns the command entered
 std::string commandPrompt(){
 	std::string input = "";
-	std::cout<<"[cmd]: ";
+	std::cout<<"["<<get_current_dir_name()<<":] ";
 	std::getline(std::cin, input);
 	return input;
 }
@@ -187,6 +187,17 @@ bool isPipeCmd(std::string command){
 	return false;
 }
 
+//Changes working directory to directory given it.
+void changeDir(char**& argv){
+	//std::stringstream ss;
+	//ss<<get_current_dir_name()
+	//char directory[] = get_current_dir_name() + argv[1];
+	int ret = chdir(argv[1]);
+	if(ret == -1){
+		throw "No such directory.";
+	}
+}
+
 int main(){
 	
 	//Signal handling:
@@ -198,6 +209,12 @@ int main(){
 	std::string command = "";
 	std::chrono::duration<double> totalTimeInChildProcesses(0);
 	
+	char ptime[] = "ptime";
+	char carat[] = "^";
+	char pwd[] = "pwd";
+	char history[] = "history";
+	char cd[] = "cd";
+	
 	while ((command=commandPrompt()) != "exit"){
 		//Try if there are things in the command.
 		try{
@@ -207,21 +224,27 @@ int main(){
 			//Parse the commands
 			numOfArgs = parseCommand(command, argv);
 			
-			if (*argv[0] == '^'){
+			if (strcmp(carat, argv[0]) == 0){
 				if (numOfArgs == 3){
-					try{
-						runNthCmdInHistory(cmdHistory, argv, command);
-					}catch(std::string error){
-						std::cout<<error<<std::endl;
-					}
+					runNthCmdInHistory(cmdHistory, argv, command);
 				}else{
-					std::cout<<"Error: incorrect number of arguments for '^ <history item>'.\n";
+					std::string error = "Error: incorrect number of arguments for '^ <history item>'.";
+					throw error;
 				}
 			}
-			if (command == "ptime"){
+			if (strcmp(ptime, argv[0]) == 0){
 				std::cout<<"Time spent executing child processes: " << totalTimeInChildProcesses.count() <<"seconds\n";
-			}else if (command == "history"){
+			}else if (strcmp(history, argv[0]) == 0){
 				listHistory(cmdHistory);
+			}else if(strcmp(cd, argv[0]) == 0){
+				if (numOfArgs == 3){
+					changeDir(argv);
+				}else{
+					std::string error = "Error: incorrect number of arguments for 'cd <directory>'.";
+					throw error;
+				}
+			}else if(strcmp(pwd, argv[0]) == 0){
+				std::cout<<get_current_dir_name()<<std::endl;
 			}else if(isPipeCmd(command)){
 				pipe(command, totalTimeInChildProcesses);	
 			}else{
