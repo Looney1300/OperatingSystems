@@ -5,8 +5,12 @@
 #include<unistd.h>
 #include<cstring>
 #include<string>
+#include<string.h>
+#include<stdio.h>
 #include<sstream>
 #include<regex>
+#include<signal.h>
+#include<functional>
 
 //this is the actual command prompt and returns the command entered
 std::string commandPrompt(){
@@ -24,7 +28,7 @@ void runAndTimeChildProcess(char* name, char** argv, std::chrono::duration<doubl
 	if(fork()){
 		wait(NULL);
 	}else{
-		execvp(name, argv);	
+		execvp(name, argv);
 		std::cout << "No program found named '" << name << "'.\n";
 		exit(13);
 	}
@@ -72,7 +76,7 @@ int parseCommand(std::string command, char**& argv){
 }
 
 //Checks to make sure at least one argument is given, and throws a std::string error if not.
-void checkArgv(const std::string& command){
+void checkIfBlank(const std::string& command){
 	std::regex re("\\s*");
 	if (std::regex_match(command, re)){
 		std::string error = "";
@@ -83,16 +87,22 @@ void checkArgv(const std::string& command){
 //Runs nth command in cmdHistory; selection made should be argv[1].
 void runNthCmdInHistory(const std::vector<std::string>& cmdHistory, char**& argv, std::string& command){
 	std::string error = "Invalid command history selection.";
-	std::regex re("\\d");
+	//std::regex re("\\d");
 	//for (int i = 0; i < sizeof(argv[1]); ++i){
 		//if (!std::regex_match(argv[0][i], re)){
 			//throw error;
 		//}
 	//}
+	
+	//Conditions for throwing errors
 	int nth = 0;
 	if (!(nth = std::stoi(argv[1]))){
 		throw error;
 	}
+	if (nth >= cmdHistory.size()){
+		throw error;
+	}
+	
 	if (nth > 0 ){
 		parseCommand(cmdHistory[nth-1], argv);
 	}else{
@@ -104,31 +114,99 @@ void runNthCmdInHistory(const std::vector<std::string>& cmdHistory, char**& argv
 	}
 }
 
+//Handles a signal by printing a blank line.
+void signalHandler(const int signalId){
+	return;
+}
+
+//Pipe function to allow piping between two programs.
+void pipe(const std::string command, std::chrono::duration<double>& totalTime){
+	char** argv1;
+	char** argv2;
+
+	//Getting two char** argv's from the one already made, 
+	//splitting it by the '|' character/argument in argv.
+	std::string command1 = "";
+	std::string command2 = "";
+	std::stringstream ss;
+	ss.str(command);
+	getline(ss, command1, '|');
+	getline(ss, command2);
+	parseCommand(command1, argv1);
+	parseCommand(command2, argv2);
+	
+	//Constants setup
+	const int PIPE_COUNT = 2;
+	const int PIPE_READ_END = 0;
+	const int PIPE_WRITE_END = 1;
+	const int STDIN = 0;
+	const int STDOUT = 1;
+	
+	//Pipe creation
+	int pids[PIPE_COUNT];
+	pipe(pids);
+	
+	//Duplicate stdout and stdin to use to connect the 
+	//ends back together later
+	int savedStdout = dup(STDOUT);
+	int savedStdin = dup(STDIN);
+	
+	//First process: put the pipe's write end in place of stdout.
+	pid_t pid1 = fork();
+	if (pid1 == 0){
+		dup2(pids[PIPE_WRITE_END], STDOUT);
+		runAndTimeChildProcess(argv1[0], argv1, totalTime);
+		exit(111);
+	}
+	//Second process: put the pipe's read end in place of stdin, 
+	//and close the pipe's write end to tell 2nd process no more 
+	//data is coming for it to read.
+	pid_t pid2 = fork();
+	if (pid2 == 0){
+		dup2(pids[PIPE_READ_END], STDIN);
+		close(pids[PIPE_WRITE_END]);
+		runAndTimeChildProcess(argv2[0], argv2, totalTime);
+		exit(111);
+	}
+	int status;
+	waitpid(pid1, &status, 0);
+	close(pids[PIPE_WRITE_END]);
+	close(pids[PIPE_READ_END]);
+	waitpid(pid2, &status, 0);
+	
+	dup2(savedStdout, STDOUT);
+	dup2(savedStdin, STDIN);
+
+}
+
+//returns true if pipe character is in the command.
+bool isPipeCmd(std::string command){
+	for (char i : command){
+		if (i == '|') return true;
+	}
+	return false;
+}
+
 int main(){
+	
+	//Signal handling:
+	signal(SIGINT, signalHandler);
+	
 	char** argv;
 	int numOfArgs = 0;
 	std::vector<std::string> cmdHistory = {};
 	std::string command = "";
 	std::chrono::duration<double> totalTimeInChildProcesses(0);
 	
-	char* ptime = new char[6];
-	strcpy(ptime, "ptime");
-	char* history = new char[8];
-	strcpy(history, "history");
-	char* exit = new char[5];
-	strcpy(exit, "exit");
-	
 	while ((command=commandPrompt()) != "exit"){
 		//Try if there are things in the command.
 		try{
-			checkArgv(command);
+			checkIfBlank(command);
 			//Store every Command.
 			storeCommand(cmdHistory, command);
 			//Parse the commands
 			numOfArgs = parseCommand(command, argv);
-			//TO-DO
-			//implement a way to split command into it's several components to pass to runAndTimeChildProcess()
-			//and/or strip the white space from each component.
+			
 			if (*argv[0] == '^'){
 				if (numOfArgs == 3){
 					try{
@@ -144,6 +222,8 @@ int main(){
 				std::cout<<"Time spent executing child processes: " << totalTimeInChildProcesses.count() <<"seconds\n";
 			}else if (command == "history"){
 				listHistory(cmdHistory);
+			}else if(isPipeCmd(command)){
+				pipe(command, totalTimeInChildProcesses);	
 			}else{
 				runAndTimeChildProcess(argv[0], argv, totalTimeInChildProcesses);
 			}
