@@ -1,15 +1,15 @@
 #include <iostream>
-#include "ThreadSafeQ.hpp"
-#include <sstream>
 #include <cstdlib>
 #include <cmath>
 #include <string>
+#include <sstream>
 
-#include <thread>
-#include <mutex>
+#include "ThreadSafeQ.hpp"
+#include "ThreadSafeHash.hpp"
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <vector>
+#include <thread>
 
 /* uncomment the following line to use 'long long' integers */
 //#define HAS_LONG_LONG 
@@ -203,34 +203,52 @@ unsigned long long piDigitHex(unsigned long long n){
 	return x;
 }
 
+void worker(ThreadSafeHash* piMap, ThreadSafeQ* q){
+	int digit;
+	while(q->getNextJob(digit)){
+		piMap->insertPair(digit, computePiDigit(digit));
+		std::cout<<".";
+		std::cout.flush();
+	}
+}
+
 int main(){
-	
-	int SHARED_KEY = 1001;
-	int SIZE = 4;
+	key_t SHARED_KEY;
+	key_t SHARED_KEY1;
+	int NUMOFDIGITS=1000;
 	
 	std::vector<int> jobs;
-	for (int i=1; i <= 1000; ++i){
+	for (int i=1; i <= NUMOFDIGITS; ++i){
 		jobs.push_back(i);
-		std::cout<<"\n" << i ;
 	}
 	
-	ThreadSafeQ tsq(jobs);
+	ThreadSafeHash* map = new ThreadSafeHash();
+	int m_id1 = shmget(SHARED_KEY1, sizeof(ThreadSafeHash), 0666|IPC_CREAT);
+	ThreadSafeHash* piMap = static_cast<ThreadSafeHash*>(shmat(m_id1, 0, 0));
+	piMap = map;
 	
-	//worker
-	// while(notEmpty){
-	//	getNextJob();
-	//	add to sstream;
-	// }
 	
-	int m_id = shmget(SHARED_KEY, SIZE, 0666|IPC_CREAT);
-	ThreadSafeQ* thSfQ = static_cast<ThreadSafeQ*>(shmat(m_id,0,0));
-	thSfQ = tsq;
+	ThreadSafeQ* thq = new ThreadSafeQ(jobs);
+	int m_id = shmget(SHARED_KEY, sizeof(thq), 0666|IPC_CREAT);
+	ThreadSafeQ* thSfQ = static_cast<ThreadSafeQ*>(shmat(m_id, 0, 0));
 	
-	std::cout<<"\n3.";
-	for (int digit = 1; digit <= 10; digit++)
-	{
-		std::cout << computePiDigit(digit);
+	//thSfQ->enqueJobs(jobs);
+	thSfQ = thq;
+	
+	std::vector<std::thread*> threads;
+	for (int i=0; i<std::thread::hardware_concurrency(); ++i){
+		threads.push_back(new std::thread(worker, piMap, thSfQ));
 	}
-	std::cout << std::endl;
+	for (std::thread* thread: threads){
+		thread->join();
+	}
+	
+	std::string pi = "\n3.";
+	std::cout << pi;
+	for (int i : jobs){
+		std::cout<<piMap->getValue(i);		
+	}
+	std::cout<<std::endl;
+
 	return 0;
 }
