@@ -8,6 +8,6 @@ endif()
 
 add_executable(Assign5
 	ComputePi.cpp
-	ComputePiDigit.cpp
+	ThreadSafeHash.hpp
 	ThreadSafeQ.hpp
 )
